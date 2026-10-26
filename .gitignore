@@ -64,3 +64,10 @@ inspect_profile.py
 DEPLOYMENT.md
 
 backend/models/all-MiniLM-L6-v2/
+
+*.zip
+
+backend/form_pipeline/autofill_back.py
+backend/form_pipeline/autofill_back2.py
+backend/form_pipeline/semantics_back.py
+

@@ -6,6 +6,7 @@ CANONOICAL_FIELDS={
         "name capital letter",
         "applicant name",
         "applicant's name",
+        "entity name"
     ],
     "first_name":[
 
@@ -56,7 +57,8 @@ CANONOICAL_FIELDS={
         "email id",
         "email address",
         "e-mail",
-        "electronic mail address"
+        "electronic mail address",
+        "applicant's email"
     ],
 
     #family
@@ -77,6 +79,111 @@ CANONOICAL_FIELDS={
         "spouse name",
         "wife name",
         "husband name",
+    ],
+
+    # Government-issued identity documents
+    "pan_number": [
+        "pan",
+        "pan number",
+        "pan no",
+        "pan no.",
+        "pan card number",
+        "permanent account number",
+        "permanent account no",
+        "permanent account no.",
+        "income tax pan",
+        "income tax permanent account number",
+        "applicant pan",
+        "applicant pan number",
+        "pan of applicant",
+        "pan details",
+        "pan card details",
+    ],
+
+    "aadhaar_number": [
+        "aadhaar",
+        "aadhaar number",
+        "aadhaar no",
+        "aadhaar no.",
+        "aadhar",
+        "aadhar number",
+        "aadhar no",
+        "aadhar no.",
+        "uid",
+        "uid number",
+        "uid no",
+        "uidai number",
+        "unique identification number",
+        "unique identity number",
+        "aadhaar card number",
+        "aadhar card number",
+        "aadhaar id",
+        "aadhar id",
+        "applicant aadhaar number",
+        "applicant aadhar number",
+        "aadhaar details",
+        "aadhar details",
+    ],
+
+    "passport_number": [
+        "passport",
+        "passport number",
+        "passport no",
+        "passport no.",
+        "passport num",
+        "passport document number",
+        "travel document number",
+        "passport number of applicant",
+        "applicant passport number",
+        "passport details",
+        "passport id number",
+    ],
+
+    "voter_id_number": [
+        "voter id",
+        "voter id number",
+        "voter id no",
+        "voter id no.",
+        "voter identity number",
+        "voter card number",
+        "voter card no",
+        "epic",
+        "epic number",
+        "epic no",
+        "epic no.",
+        "elector photo identity card number",
+        "elector photo identity card no",
+        "elector id",
+        "elector id number",
+        "elector number",
+        "voter registration id",
+        "applicant voter id",
+        "applicant voter id number",
+    ],
+
+    "driving_licence_number": [
+        "driving licence",
+        "driving license",
+        "driving licence number",
+        "driving license number",
+        "driving licence no",
+        "driving license no",
+        "driving licence no.",
+        "driving license no.",
+        "dl number",
+        "dl no",
+        "dl no.",
+        "licence number",
+        "license number",
+        "driving permit number",
+        "driver licence number",
+        "driver license number",
+        "driver's licence number",
+        "drivers license number",
+        "applicant driving licence number",
+        "applicant driving license number",
+        "driving licence details",
+        "driving license details",
     ],
 
     #Address
@@ -138,9 +245,9 @@ CANONOICAL_FIELDS={
 
     "city": [
         "city",
-        "town",
         "city/town",
-        "city/town/village"
+        "city/town/village",
+        "district"
     ],
 
     "district": [

@@ -29,5 +29,7 @@ class IdentityProfile(BaseModel):
     year_of_birth: str|None=None
 
     aadhaar_number: str|None=None
+    pan_number: str|None=None
     voter_id: str|None=None
     birth_registration_number: str|None=None
+    passport_number: str|None=None

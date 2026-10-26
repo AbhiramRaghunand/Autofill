@@ -136,7 +136,8 @@ class FormFillingService:
         print("Place of Birth:", identity_profile.place_of_birth)
         print("Gender:", identity_profile.gender)
         print("Year of Birth:", identity_profile.year_of_birth)
-        print("Aadhaar Number:", identity_profile.aadhaar_number)
+        print("Aadhaar Number: [present]" if identity_profile.aadhaar_number else "Aadhaar Number: [empty]")
+        print("PAN Number: [present]" if identity_profile.pan_number else "PAN Number: [empty]")
         print("Voter ID:", identity_profile.voter_id)
         print(
             "Birth Registration Number:",
@@ -145,13 +146,19 @@ class FormFillingService:
 
         print("================================================\n")
 
-        # 8. AutoFill
+        # 8. Collect cell geometry from Textract as a fallback for faint or
+        # partially detected grids. Image-based grid detection remains preferred.
+        cell_boxes = field_extractor.extract_cell_box()
+
+        # 9. AutoFill
         output_path = self.autofill_service.fill(
             image=image,
             textract_result=textract_result,
             matched_fields=matched_fields,
             identity_profile=identity_profile,
-            checkbox_options=checkbox_options
+            checkbox_options=checkbox_options,
+            cell_boxes=cell_boxes,
+            extractor=field_extractor,
         )
 
         return {
@@ -369,6 +376,10 @@ class FormFillingService:
 
             aadhaar_number=profile.get(
                 "aadhaar_number", ""
+            ),
+
+            pan_number=profile.get(
+                "pan_number", ""
             ),
 
             voter_id=profile.get(

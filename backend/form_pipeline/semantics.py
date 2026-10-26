@@ -41,6 +41,18 @@ class SemanticMatcher:
             "guardian name",
             "name of guardian",
         }
+        # These labels describe controls or legal text, not identity values.
+        # Never semantically map them to a profile field.
+        self.non_data_label_patterns = (
+            r"\bsignature\b", r"\bthumb impression\b",
+            r"\bdeclaration\b", r"\bi hereby\b",
+            r"\bi confirm\b", r"\bi understand\b",
+            r"\bi consent\b", r"\bconsent that\b",
+            r"\bproof of identity\b", r"\bproof of address\b",
+            r"\bproof of date of birth\b", r"\bbiometric\b",
+            r"\bupdate of poi\b", r"\bthird gender\b",
+            r"\bfemale\b", r"\bmale\b", r"\btransgender\b",
+        )
         self.compatible_types = {
             "name": {"text"},
             "first_name": {"text"},
@@ -150,6 +162,19 @@ class SemanticMatcher:
         normalized_label = self._normalize_label(field.normalized_label)
 
         if not normalized_label:
+            return None, -1.0, None, None
+
+        # Long prose often mentions a data concept without asking for that
+        # value (e.g. an Aadhaar declaration). Option labels are also handled
+        # by checkbox/radio logic, not by ordinary text-field matching.
+        option_labels = {
+            "father", "mother", "spouse", "sibling", "child ward",
+            "legal guardian", "third gender", "female", "male", "transgender",
+        }
+        if normalized_label in option_labels or len(normalized_label) > 90 or any(
+            re.search(pattern, normalized_label)
+            for pattern in self.non_data_label_patterns
+        ):
             return None, -1.0, None, None
 
         # A generic guardian label is intentionally not autofilled because
