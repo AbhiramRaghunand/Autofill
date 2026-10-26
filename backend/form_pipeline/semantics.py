@@ -4,7 +4,9 @@ from collections import defaultdict
 import numpy as np
 from backend.form_pipeline.canonical_fields import CANONOICAL_FIELDS
 from backend.models.form_models import FormField, MatchField
-from sentence_transformers import SentenceTransformer
+import onnxruntime as ort
+from tokenizers import Tokenizer
+from huggingface_hub import hf_hub_download
 
 import os
 from pathlib import Path
@@ -13,12 +15,10 @@ class SemanticMatcher:
     def __init__(self):
         """Load the quantized ONNX model to reduce inference memory on Render.
 
-        By default, use a quantized all-MiniLM-L6-v2 repository that includes
-        the Sentence Transformers module configuration and tokenizer files.
-        If SENTENCE_TRANSFORMER_MODEL_PATH is set, it must point to a local
-        Sentence Transformers model directory containing the configured ONNX
-        file. We deliberately do not fall back to the PyTorch backend because
-        that can recreate the Render startup memory problem.
+        The model graph runs directly in ONNX Runtime. If
+        SENTENCE_TRANSFORMER_MODEL_PATH is set, it must point to a local
+        directory containing the configured ONNX file and tokenizer.json.
+        Otherwise, only those two files are downloaded from the model repository.
         """
         model_id = os.getenv(
             "SENTENCE_TRANSFORMER_MODEL_ID",
@@ -30,32 +30,46 @@ class SemanticMatcher:
         )
         model_path_value = os.getenv("SENTENCE_TRANSFORMER_MODEL_PATH")
 
-        model_kwargs = {
-            "file_name": onnx_file,
-            "provider": "CPUExecutionProvider",
-            "export": False,
-        }
-
+        # Use ONNX Runtime directly instead of SentenceTransformer. This avoids
+        # importing the PyTorch inference stack in the 512 MiB Render instance.
         if model_path_value:
             model_path = Path(model_path_value)
-            expected_model_file = model_path / onnx_file
-            if not model_path.is_dir() or not expected_model_file.is_file():
+            model_file = model_path / onnx_file
+            tokenizer_file = model_path / "tokenizer.json"
+            if not model_path.is_dir() or not model_file.is_file():
                 raise RuntimeError(
                     "SENTENCE_TRANSFORMER_MODEL_PATH must point to a local "
-                    "Sentence Transformers model directory containing "
-                    f"'{onnx_file}'. The configured path was: {model_path}. "
-                    "Remove this environment variable to use the default "
-                    "quantized ONNX model from the model repository."
+                    "model directory containing "
+                    f"'{onnx_file}'. Configured path: {model_path}."
                 )
-            model_source = str(model_path)
+            if not tokenizer_file.is_file():
+                raise RuntimeError(
+                    "SENTENCE_TRANSFORMER_MODEL_PATH must also contain tokenizer.json. "
+                    f"Expected: {tokenizer_file}"
+                )
         else:
-            model_source = model_id
+            model_file = Path(hf_hub_download(repo_id=model_id, filename=onnx_file))
+            tokenizer_file = Path(
+                hf_hub_download(repo_id=model_id, filename="tokenizer.json")
+            )
 
-        self.model = SentenceTransformer(
-            model_source,
-            backend="onnx",
-            model_kwargs=model_kwargs,
+        self.tokenizer = Tokenizer.from_file(str(tokenizer_file))
+        self.tokenizer.enable_truncation(max_length=256)
+        self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
+
+        session_options = ort.SessionOptions()
+        session_options.intra_op_num_threads = 1
+        session_options.inter_op_num_threads = 1
+        session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        session_options.graph_optimization_level = (
+            ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         )
+        self.session = ort.InferenceSession(
+            str(model_file),
+            sess_options=session_options,
+            providers=["CPUExecutionProvider"],
+        )
+        self._onnx_input_names = {item.name for item in self.session.get_inputs()}
 
         self.threshold = 0.70
         self.ambiguity_margin = 0.05
@@ -127,6 +141,36 @@ class SemanticMatcher:
 
         return label
 
+    def _encode_texts(self, texts: list[str]) -> np.ndarray:
+        """Encode text with quantized ONNX, mean pooling, and L2 normalization."""
+        if isinstance(texts, str):
+            texts = [texts]
+        if not texts:
+            return np.empty((0, 384), dtype=np.float32)
+
+        encoded = self.tokenizer.encode_batch(list(texts))
+        input_ids = np.asarray([item.ids for item in encoded], dtype=np.int64)
+        attention_mask = np.asarray(
+            [item.attention_mask for item in encoded], dtype=np.int64
+        )
+        feeds = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+        }
+        if "token_type_ids" in self._onnx_input_names:
+            feeds["token_type_ids"] = np.asarray(
+                [item.type_ids for item in encoded], dtype=np.int64
+            )
+
+        token_embeddings = self.session.run(None, feeds)[0]
+        mask = attention_mask[..., None].astype(np.float32)
+        sentence_embeddings = (token_embeddings * mask).sum(axis=1) / np.clip(
+            mask.sum(axis=1), 1e-9, None
+        )
+        norms = np.linalg.norm(sentence_embeddings, axis=1, keepdims=True)
+        sentence_embeddings = sentence_embeddings / np.clip(norms, 1e-12, None)
+        return sentence_embeddings.astype(np.float32, copy=False)
+
     def _build_canonical_embedding(self):
         embedding_store = []
 
@@ -144,11 +188,7 @@ class SemanticMatcher:
             if not unique_aliases:
                 continue
 
-            alias_embeddings = self.model.encode(
-                unique_aliases,
-                convert_to_numpy=True,
-                normalize_embeddings=True,
-            )
+            alias_embeddings = self._encode_texts(unique_aliases)
 
             for alias, embedding in zip(unique_aliases, alias_embeddings):
                 embedding_store.append({
@@ -221,11 +261,7 @@ class SemanticMatcher:
             return None, 1.0, None, None
 
         # Step 2: Fall back to semantic similarity.
-        field_embedding = self.model.encode(
-            normalized_label,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-        )
+        field_embedding = self._encode_texts([normalized_label])[0]
 
         best_by_canonical = {}
 
