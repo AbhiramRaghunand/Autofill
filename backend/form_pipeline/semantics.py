@@ -11,26 +11,52 @@ from pathlib import Path
 
 class SemanticMatcher:
     def __init__(self):
-        model_path = Path(
-            os.getenv(
-                "SENTENCE_TRANSFORMER_MODEL_PATH",
-                str(
-                    Path(__file__).resolve().parents[1]
-                    / "models"
-                    / "all-MiniLM-L6-v2"
-                ),
-            )
+        """Load the quantized ONNX model to reduce inference memory on Render.
+
+        By default, use a quantized all-MiniLM-L6-v2 repository that includes
+        the Sentence Transformers module configuration and tokenizer files.
+        If SENTENCE_TRANSFORMER_MODEL_PATH is set, it must point to a local
+        Sentence Transformers model directory containing the configured ONNX
+        file. We deliberately do not fall back to the PyTorch backend because
+        that can recreate the Render startup memory problem.
+        """
+        model_id = os.getenv(
+            "SENTENCE_TRANSFORMER_MODEL_ID",
+            "monju-lab/all-MiniLM-L6-v2-onnx",
+        )
+        onnx_file = os.getenv(
+            "SENTENCE_TRANSFORMER_ONNX_FILE",
+            "onnx/model_quint8_avx2.onnx",
+        )
+        model_path_value = os.getenv("SENTENCE_TRANSFORMER_MODEL_PATH")
+
+        model_kwargs = {
+            "file_name": onnx_file,
+            "provider": "CPUExecutionProvider",
+            "export": False,
+        }
+
+        if model_path_value:
+            model_path = Path(model_path_value)
+            expected_model_file = model_path / onnx_file
+            if not model_path.is_dir() or not expected_model_file.is_file():
+                raise RuntimeError(
+                    "SENTENCE_TRANSFORMER_MODEL_PATH must point to a local "
+                    "Sentence Transformers model directory containing "
+                    f"'{onnx_file}'. The configured path was: {model_path}. "
+                    "Remove this environment variable to use the default "
+                    "quantized ONNX model from the model repository."
+                )
+            model_source = str(model_path)
+        else:
+            model_source = model_id
+
+        self.model = SentenceTransformer(
+            model_source,
+            backend="onnx",
+            model_kwargs=model_kwargs,
         )
 
-        if model_path.exists():
-            self.model = SentenceTransformer(
-                str(model_path),
-                local_files_only=True,
-            )
-        else:
-            self.model = SentenceTransformer("all-MiniLM-L6-v2")
-
-        
         self.threshold = 0.70
         self.ambiguity_margin = 0.05
         # Lower than the autofill threshold: used only to decide whether a rejected

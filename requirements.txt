@@ -11,7 +11,7 @@ matplotlib
 scikit-learn
 pdf2image
 boto3
-sentence-transformers
+sentence-transformers[onnx]>=5.0.0
 rapidfuzz
 scipy
 pytest
