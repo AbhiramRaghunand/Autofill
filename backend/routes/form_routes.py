@@ -1,4 +1,5 @@
 import base64
+import logging
 from pathlib import Path
 
 from bson import ObjectId
@@ -9,6 +10,8 @@ from backend.auth import get_authenticated_user_id
 from backend.security.audit_logger import log_security_event
 from backend.services.form_filling_service import FormFillingService
 from backend.utils.secure_files import secure_delete_file
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/forms", tags=["Forms"])
 form_filling_service = FormFillingService()
@@ -21,6 +24,7 @@ async def fill_form(
     user_id: ObjectId = Depends(get_authenticated_user_id),
 ):
     client_ip = request.client.host if request.client else None
+
     try:
         result = await form_filling_service.fill(
             uploaded_file=form,
@@ -29,7 +33,10 @@ async def fill_form(
 
         output_path = Path(result["output_path"])
         if not output_path.exists():
-            raise HTTPException(status_code=500, detail="The completed form could not be found.")
+            raise HTTPException(
+                status_code=500,
+                detail="The completed form could not be found.",
+            )
 
         output_suffix = output_path.suffix.lower()
         media_type = "application/pdf" if output_suffix == ".pdf" else "image/png"
@@ -37,9 +44,12 @@ async def fill_form(
         try:
             file_bytes = output_path.read_bytes()
         except OSError as exc:
-            raise HTTPException(status_code=500, detail="Unable to read the completed form.") from exc
+            raise HTTPException(
+                status_code=500,
+                detail="Unable to read the completed form.",
+            ) from exc
         finally:
-            # Ephemeral file lifecycle: purge generated form from disk immediately after encoding
+            # Ephemeral file lifecycle: purge generated form from disk immediately after encoding.
             secure_delete_file(output_path)
 
         log_security_event(
@@ -62,6 +72,9 @@ async def fill_form(
     except HTTPException:
         raise
     except Exception as exc:
+        # Keep the detailed traceback in server logs, not in the client response.
+        logger.exception("Unexpected error while processing /api/forms/fill")
+
         log_security_event(
             action="FORM_AUTOFILL_FAILED",
             user_id=user_id,
@@ -69,4 +82,7 @@ async def fill_form(
             ip_address=client_ip,
             status="FAILURE",
         )
-        raise HTTPException(status_code=500, detail="Unable to process the form. Please try again.") from exc
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to process the form. Please try again.",
+        ) from exc
