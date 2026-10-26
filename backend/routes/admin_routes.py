@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from backend.auth import require_role
@@ -52,7 +52,7 @@ async def get_system_stats() -> dict[str, Any]:
 
 
 @router.get("/users")
-async def list_users(limit: int = 50) -> list[dict[str, Any]]:
+async def list_users(limit: int = Query(default=50, ge=1, le=100)) -> list[dict[str, Any]]:
     """
     Lists users for administrative management.
     Zero-knowledge enforcement: never exposes patient-encrypted PII (names, Aadhaar, PAN).
@@ -186,7 +186,7 @@ async def update_user_role(
 
 
 @router.get("/audit-logs")
-async def get_global_audit_logs(limit: int = 100) -> list[dict[str, Any]]:
+async def get_global_audit_logs(limit: int = Query(default=100, ge=1, le=100)) -> list[dict[str, Any]]:
     """Retrieves system-wide immutable audit trail logs."""
     database = get_database()
     cursor = database.audit_logs.find(

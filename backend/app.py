@@ -7,9 +7,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
+from backend.security.rate_limiter import limiter
 
 from backend.routes.admin_routes import router as admin_router
 from backend.routes.auth_routes import router as auth_router
@@ -27,7 +27,6 @@ async def lifespan(app: FastAPI):
     yield
 
 
-limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="AutoForm Unified API",

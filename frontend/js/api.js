@@ -1,17 +1,8 @@
 // frontend/js/api.js
 
 const API_BASE_URL = String(window.MEDFORM_API_BASE_URL || "").replace(/\/$/, "");
-let isRefreshing = false;
-let refreshSubscribers = [];
-
-function onRefreshed(token) {
-    refreshSubscribers.forEach((cb) => cb(token));
-    refreshSubscribers = [];
-}
-
-function addRefreshSubscriber(cb) {
-    refreshSubscribers.push(cb);
-}
+// Share one refresh request among concurrent API calls.
+let refreshPromise = null;
 
 function showSecurityToast(message, isError = false) {
     let container = document.getElementById("securityToastContainer");
@@ -64,14 +55,14 @@ function showSecurityToast(message, isError = false) {
     }, 4500);
 }
 
-async function apiRequest(endpoint, options = {}) {
+async function apiRequest(endpoint, options = {}, hasRetried = false) {
     const token = localStorage.getItem("access_token");
 
     const headers = {
         ...(options.headers || {}),
     };
 
-    if (!(options.body instanceof FormData)) {
+    if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
         headers["Content-Type"] = "application/json";
     }
 
@@ -82,6 +73,8 @@ async function apiRequest(endpoint, options = {}) {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         ...options,
         headers,
+        // Needed for the HttpOnly refresh cookie. Same-origin requests also work.
+        credentials: "include",
     });
 
     const contentType = response.headers.get("content-type") || "";
@@ -93,61 +86,71 @@ async function apiRequest(endpoint, options = {}) {
         data = await response.text();
     }
 
-    // Handle 401 Unauthorized with automatic token refresh (except for auth endpoints)
-    if (response.status === 401 && !endpoint.includes("/api/auth/login") && !endpoint.includes("/api/auth/refresh")) {
-        const isSuperseded = (data && typeof data === "object" && (data.detail?.error === "SESSION_SUPERSEDED" || data.error === "SESSION_SUPERSEDED"));
-        const refreshToken = localStorage.getItem("refresh_token");
+    // Handle 401 Unauthorized with cookie-based automatic token refresh.
+    // The refresh token is never read by JavaScript or sent in a JSON body.
+    const isLoginEndpoint = endpoint.includes("/api/auth/login");
+    const isRefreshEndpoint = endpoint.includes("/api/auth/refresh");
 
-        if (refreshToken && !isSuperseded) {
-            if (!isRefreshing) {
-                isRefreshing = true;
+    if (response.status === 401 && !hasRetried && !isLoginEndpoint && !isRefreshEndpoint) {
+        const isSuperseded = (
+            data &&
+            typeof data === "object" &&
+            (data.detail?.error === "SESSION_SUPERSEDED" || data.error === "SESSION_SUPERSEDED")
+        );
 
-                try {
-                    const refreshRes = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ refresh_token: refreshToken }),
-                    });
+        let newAccessToken = null;
 
-                    if (refreshRes.ok) {
-                        const refreshData = await refreshRes.json();
-                        if (refreshData.access_token) {
-                            localStorage.setItem("access_token", refreshData.access_token);
-                            if (refreshData.refresh_token) {
-                                localStorage.setItem("refresh_token", refreshData.refresh_token);
-                            }
-                            onRefreshed(refreshData.access_token);
-                            isRefreshing = false;
+        if (!isSuperseded) {
+            try {
+                if (!refreshPromise) {
+                    refreshPromise = (async () => {
+                        const refreshRes = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+                            method: "POST",
+                            credentials: "include",
+                        });
 
-                            // Retry original request
-                            headers["Authorization"] = `Bearer ${refreshData.access_token}`;
-                            const retryRes = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
-                            const retryType = retryRes.headers.get("content-type") || "";
-                            return retryType.includes("application/json") ? await retryRes.json() : await retryRes.text();
+                        if (!refreshRes.ok) {
+                            throw new Error("Refresh session is no longer valid");
                         }
-                    }
-                } catch (refreshErr) {
-                    console.warn("Silent token refresh failed:", refreshErr);
-                } finally {
-                    isRefreshing = false;
+
+                        const refreshData = await refreshRes.json();
+                        if (!refreshData.access_token) {
+                            throw new Error("Refresh response did not contain an access token");
+                        }
+
+                        return refreshData.access_token;
+                    })();
                 }
-            } else {
-                // If refresh is already in progress, wait and retry
-                return new Promise((resolve, reject) => {
-                    addRefreshSubscriber((newToken) => {
-                        headers["Authorization"] = `Bearer ${newToken}`;
-                        fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers })
-                            .then((res) => res.json())
-                            .then(resolve)
-                            .catch(reject);
-                    });
-                });
+
+                newAccessToken = await refreshPromise;
+            } catch (refreshErr) {
+                console.warn("Silent token refresh failed:", refreshErr);
+            } finally {
+                refreshPromise = null;
             }
         }
 
-        // Refresh failed, no refresh token, or session superseded by another login
+        if (newAccessToken) {
+            localStorage.setItem("access_token", newAccessToken);
+
+            // Retry once only; preserve caller options and all existing request headers.
+            return apiRequest(
+                endpoint,
+                {
+                    ...options,
+                    headers: {
+                        ...(options.headers || {}),
+                        Authorization: `Bearer ${newAccessToken}`,
+                    },
+                },
+                true
+            );
+        }
+
+        // Remove any legacy refresh token left by an older version of the app.
         localStorage.removeItem("access_token");
         localStorage.removeItem("refresh_token");
+
         if (window.location.pathname.includes("/pages/") && !window.location.pathname.includes("/login/")) {
             const noticeMsg = isSuperseded
                 ? "You have been signed out because this account was logged in on another device or platform."

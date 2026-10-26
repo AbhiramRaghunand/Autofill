@@ -8,16 +8,9 @@ function getAccessToken() {
     return localStorage.getItem("access_token");
 }
 
-function saveRefreshToken(token) {
-    localStorage.setItem("refresh_token", token);
-}
-
-function getRefreshToken() {
-    return localStorage.getItem("refresh_token");
-}
-
 function clearAuthTokens() {
     localStorage.removeItem("access_token");
+    // Clean up refresh tokens saved by older app versions.
     localStorage.removeItem("refresh_token");
 }
 
@@ -35,7 +28,7 @@ function isTokenExpired(token) {
 }
 
 function getUserRole() {
-    const token = getAccessToken() || getRefreshToken();
+    const token = getAccessToken();
     if (!token) return null;
     try {
         const payload = token.split(".")[1];
@@ -55,17 +48,10 @@ function isAdmin() {
 function isAuthenticated() {
     const token = getAccessToken();
 
-    if (!token || isTokenExpired(token)) {
-        // If access token is expired, we might still have a refresh token
-        const refreshToken = getRefreshToken();
-        if (refreshToken && !isTokenExpired(refreshToken)) {
-            return true;
-        }
-        clearAuthTokens();
-        return false;
-    }
-
-    return true;
+    // Keep protected pages reachable when the short-lived access token expires.
+    // Their first API request will attempt cookie-based refresh. If that fails,
+    // apiRequest clears the access token and redirects to login.
+    return Boolean(token);
 }
 
 document.querySelectorAll(".brand[data-authenticated-href]").forEach((brand) => {
@@ -83,7 +69,9 @@ document.querySelectorAll(".brand[data-authenticated-href]").forEach((brand) => 
 async function logout() {
     const token = getAccessToken();
     try {
-        if (token && typeof apiRequest === "function") {
+        if (typeof apiRequest === "function") {
+            // Call the server even without a local access token: the cookie may
+            // still exist, and apiRequest can refresh before retrying logout.
             await apiRequest("/api/auth/logout", { method: "POST" });
         }
     } catch (err) {

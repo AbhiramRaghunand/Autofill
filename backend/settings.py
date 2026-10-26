@@ -27,6 +27,7 @@ class Settings:
     hmac_salt_secret: str = ""
     jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
+    refresh_cookie_secure: bool = False
 
 
 @lru_cache(maxsize=1)
@@ -44,6 +45,8 @@ def get_settings() -> Settings:
         hmac_salt_secret=os.getenv("HMAC_SALT_SECRET", "").strip(),
         jwt_secret_key=os.getenv("JWT_SECRET_KEY", "development-secret-change-me").strip(),
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256").strip(),
+        # Set REFRESH_COOKIE_SECURE=true in HTTPS deployments.
+        refresh_cookie_secure=os.getenv("REFRESH_COOKIE_SECURE", "false").strip().lower() in {"1", "true", "yes", "on"},
     )
 
     settings.upload_dir.mkdir(parents=True, exist_ok=True)

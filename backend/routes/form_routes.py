@@ -65,8 +65,8 @@ async def fill_form(
         log_security_event(
             action="FORM_AUTOFILL_FAILED",
             user_id=user_id,
-            details={"error": str(exc)},
+            details={"error_type": type(exc).__name__},
             ip_address=client_ip,
             status="FAILURE",
         )
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Unable to process the form. Please try again.") from exc

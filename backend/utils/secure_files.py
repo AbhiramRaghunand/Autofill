@@ -34,6 +34,9 @@ def temporary_upload_file(
     Saves binary bytes into a temporary file on disk and guarantees its
     immediate removal upon exiting the context block, even on exceptions.
     """
+    # NamedTemporaryFile creates files with restrictive permissions (0600 on
+    # POSIX). Keep the file private while it exists; unlinking is not a promise
+    # of forensic erasure on SSDs or journaled filesystems.
     temp_file = NamedTemporaryFile(delete=False, suffix=suffix, prefix=prefix)
     temp_path = Path(temp_file.name)
     try:

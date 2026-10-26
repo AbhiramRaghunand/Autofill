@@ -37,6 +37,7 @@ def log_security_event(
 
 def get_user_security_activity(user_id: ObjectId | str, limit: int = 100) -> dict[str, Any]:
     """Retrieves total count and recent security activity for a user."""
+    limit = max(1, min(int(limit), 100))
     try:
         database = get_database()
         user_str = str(user_id)

@@ -14,6 +14,11 @@ from backend.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
+
+class TokenRevocationUnavailable(RuntimeError):
+    """Raised when revocation status cannot be determined safely."""
+
+
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
@@ -88,8 +93,8 @@ def is_jti_blacklisted(jti: str) -> bool:
         database = get_database()
         return database.token_blacklist.find_one({"jti": jti}) is not None
     except Exception as exc:
-        logger.warning("Failed to query token blacklist: %s", exc)
-        return False
+        logger.error("Failed to query token blacklist; rejecting authentication", exc_info=True)
+        raise TokenRevocationUnavailable("Token revocation status is unavailable") from exc
 
 
 def blacklist_token(token: str) -> bool:
@@ -152,7 +157,9 @@ def verify_refresh_token(refresh_token: str) -> dict[str, Any]:
         raise ValueError("Provided token is not a refresh token")
 
     jti = payload.get("jti")
-    if jti and is_jti_blacklisted(jti):
+    if not jti:
+        raise ValueError("Refresh token is missing its identifier")
+    if is_jti_blacklisted(jti):
         raise ValueError("Refresh token has been revoked")
 
     return payload

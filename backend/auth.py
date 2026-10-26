@@ -9,7 +9,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend.database.mongodb import get_database
-from backend.services.token_service import is_jti_blacklisted
+from backend.services.token_service import TokenRevocationUnavailable, is_jti_blacklisted
 from backend.settings import get_settings
 
 security = HTTPBearer(auto_error=False)
@@ -37,7 +37,15 @@ async def get_authenticated_user_id(
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
 
     jti = payload.get("jti")
-    if jti and is_jti_blacklisted(jti):
+    if not jti:
+        request.state.user_id = None
+        request.state.user_role = None
+        raise HTTPException(status_code=401, detail="Token is missing its identifier")
+    try:
+        revoked = is_jti_blacklisted(jti)
+    except TokenRevocationUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Authentication service temporarily unavailable") from exc
+    if revoked:
         request.state.user_id = None
         request.state.user_role = None
         raise HTTPException(status_code=401, detail="Token has been revoked")
@@ -55,44 +63,38 @@ async def get_authenticated_user_id(
         request.state.user_role = None
         raise HTTPException(status_code=401, detail="Invalid user identity in token") from exc
 
-    user_role = payload.get("role", "patient")
-
+    # Re-fetch current account state and role. A JWT role must not preserve
+    # privileges after an administrator is downgraded or an account is disabled.
     sid = payload.get("sid")
+    try:
+        database = get_database()
+        user_doc = database.users.find_one(
+            {"_id": user_obj_id},
+            {"role": 1, "is_active": 1, "active_session_id": 1, "session_expires_at": 1},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Authentication service temporarily unavailable") from exc
+
+    if not user_doc or user_doc.get("is_active") is False:
+        raise HTTPException(status_code=401, detail="Account is unavailable")
+    user_role = user_doc.get("role", "patient")
+    active_sid = user_doc.get("active_session_id")
+    if sid and active_sid != sid:
+        request.state.user_id = None
+        request.state.user_role = None
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "SESSION_SUPERSEDED", "message": "This session is no longer active. Please sign in again."},
+        )
     if sid:
         try:
-            database = get_database()
-            user_doc = database.users.find_one(
-                {"_id": user_obj_id},
-                {"active_session_id": 1, "is_active": 1, "session_expires_at": 1},
+            now = datetime.now(timezone.utc)
+            database.users.update_one(
+                {"_id": user_obj_id, "active_session_id": sid, "is_active": {"$ne": False}},
+                {"$set": {"session_expires_at": now + timedelta(minutes=15)}},
             )
-            if user_doc:
-                active_sid = user_doc.get("active_session_id")
-                if active_sid and active_sid != sid:
-                    request.state.user_id = None
-                    request.state.user_role = None
-                    raise HTTPException(
-                        status_code=401,
-                        detail={
-                            "error": "SESSION_SUPERSEDED",
-                            "message": "You have been signed out because this account session is no longer active.",
-                        },
-                    )
-                else:
-                    # Heartbeat: refresh active session validity window while user is active
-                    now = datetime.now(timezone.utc)
-                    database.users.update_one(
-                        {"_id": user_obj_id},
-                        {
-                            "$set": {
-                                "active_session_id": sid,
-                                "session_expires_at": now + timedelta(minutes=15),
-                            }
-                        },
-                    )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Session validation temporarily unavailable") from exc
 
     request.state.user_id = user_obj_id
     request.state.user_role = user_role

@@ -163,12 +163,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 throw new Error("Login succeeded, but no access token was returned.");
             }
 
+            // The backend stores the refresh token in an HttpOnly cookie.
+            // JavaScript only keeps the short-lived access token.
             saveAccessToken(data.access_token);
-            if (data.refresh_token && typeof saveRefreshToken === "function") {
-                saveRefreshToken(data.refresh_token);
-            } else if (data.refresh_token) {
-                localStorage.setItem("refresh_token", data.refresh_token);
-            }
 
             window.location.href = "../dashboard/dashboard.html";
 
